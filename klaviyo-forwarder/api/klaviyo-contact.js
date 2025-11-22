@@ -93,20 +93,12 @@ export default async function handler(req, res) {
     // Collect event properties from payload (safe copy)
     const eventProps = {
       page_url: payload.page_url || payload['page_url'] || '',
-      page_title: payload.page_title || '',
-      page_pathname: payload.page_pathname || '',
       referrer: payload.referrer || '',
       product_handle: payload.product_handle || '',
-      product_title: payload.product_title || '',
-      product_id: payload.product_id || '',
-      utm_source: payload.utm_source || '',
-      utm_medium: payload.utm_medium || '',
-      utm_campaign: payload.utm_campaign || ''
     };
 
-    const eventBody = {
-      data: [
-        {
+      const eventBody = {
+        data: {
           type: 'event',
           attributes: {
             metric: 'Contact Form Submitted',
@@ -115,9 +107,9 @@ export default async function handler(req, res) {
             properties: eventProps
           }
         }
-      ]
-    };
+      };
 
+    
     const eventResp = await fetch('https://a.klaviyo.com/api/events', {
       method: 'POST',
       headers: {
@@ -130,9 +122,9 @@ export default async function handler(req, res) {
 
     const eventText = await eventResp.text();
     let eventJson = null;
-    try { eventJson = JSON.parse(eventText); } catch(e){ eventJson = eventText; }
-
-    // Event failure should not block success of profile/list linking — log and continue
+    try { eventJson = JSON.parse(eventText); } catch (e) { eventJson = eventText; }
+    
+    // Log non-200 but don't fail the whole request
     if (!eventResp.ok) {
       console.warn('EVENT CREATE WARNING:', eventResp.status, eventText);
     }
