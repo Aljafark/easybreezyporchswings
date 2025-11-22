@@ -146,3 +146,44 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok:false, message:'Server error', error:String(err) });
   }
 }
+
+// --- TRACK via Klaviyo /api/track (simple, auto-creates metric) ---
+try {
+  const KLAVIYO_PUBLIC_KEY = process.env.KLAVIYO_PUBLIC_KEY || '';
+  if (KLAVIYO_PUBLIC_KEY) {
+    const trackPayload = {
+      token: KLAVIYO_PUBLIC_KEY,
+      event: 'Contact Form Submitted',
+      customer_properties: { '$email': email }, // $email is expected in legacy track
+      properties: {
+        page_url: payload.page_url || '',
+        referrer: payload.referrer || '',
+        product_handle: payload.product_handle || '',
+        product_title: payload.product_title || '',
+        product_id: payload.product_id || '',
+        utm_source: payload.utm_source || '',
+        utm_medium: payload.utm_medium || '',
+        utm_campaign: payload.utm_campaign || ''
+      }
+    };
+
+    // Base64 encode payload and send as data=<base64>
+    const dataString = Buffer.from(JSON.stringify(trackPayload)).toString('base64');
+    const trackResp = await fetch('https://a.klaviyo.com/api/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(dataString)}`
+    });
+
+    const trackText = await trackResp.text();
+    if (!trackResp.ok) {
+      console.warn('Klaviyo track failed', trackResp.status, trackText);
+    } else {
+      console.log('Klaviyo track OK', trackText);
+    }
+  } else {
+    console.warn('No KLAVIYO_PUBLIC_KEY set; skipping track');
+  }
+} catch (err) {
+  console.warn('Track error', String(err));
+}
