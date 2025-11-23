@@ -1,44 +1,33 @@
 // /api/klaviyo-contact.js
 export default async function handler(req, res) {
-  // --- CORS (tighten origin in production if desired) ---
+  // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") {
-    return res
-      .status(405)
-      .json({ ok: false, message: "Method Not Allowed" });
+    return res.status(405).json({ ok: false, message: "Method Not Allowed" });
   }
 
   try {
     const payload =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
-    // --- Extract email (Dawn contact form uses name="contact[email]") ---
+    // --- EMAIL ---
     const email =
       payload["contact[email]"] ||
       payload.email ||
       payload.contact_email ||
       "";
     if (!email) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "Missing email" });
+      return res.status(400).json({ ok: false, message: "Missing email" });
     }
 
+    // --- ENV CONFIG ---
     const KLAVIYO_API_KEY = (process.env.KLAVIYO_API_KEY || "").trim();
-    const KLAVIYO_LIST_ID = (
-      payload.klaviyo_list ||
-      process.env.KLAVIYO_LIST_ID ||
-      ""
-    ).trim();
+    const KLAVIYO_LIST_ID = (process.env.KLAVIYO_LIST_ID || "").trim();
     const REVISION = process.env.KLAVIYO_API_REVISION || "2025-10-15";
-    const ALLOWED = (process.env.ALLOWED_KLAVIYO_LISTS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
 
     if (!KLAVIYO_API_KEY) {
       return res
@@ -47,17 +36,12 @@ export default async function handler(req, res) {
     }
     if (!KLAVIYO_LIST_ID) {
       return res
-        .status(400)
-        .json({ ok: false, message: "Missing klaviyo_list" });
-    }
-    if (ALLOWED.length && !ALLOWED.includes(KLAVIYO_LIST_ID)) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "klaviyo_list not allowed" });
+        .status(500)
+        .json({ ok: false, message: "Missing KLAVIYO_LIST_ID in env" });
     }
 
-    // --- Extract contact fields from payload ---
-    // Name: Dawn uses contact[Name] (capitalized) in English; your curl uses "first_name"
+    // --- EXTRACT CONTACT FIELDS FROM FORM ---
+    // Name: contact[Name], contact[name], first_name, name
     const contactName =
       payload["contact[Name]"] ||
       payload["contact[name]"] ||
@@ -65,14 +49,14 @@ export default async function handler(req, res) {
       payload.name ||
       "";
 
-    // Phone: contact[Phone] or generic keys
+    // Phone: contact[Phone], contact[phone], phone
     const contactPhone =
       payload["contact[Phone]"] ||
       payload["contact[phone]"] ||
       payload.phone ||
       "";
 
-    // Comment / message textarea field
+    // Message/comment: many possible keys
     const contactMessage =
       payload["contact[Message]"] ||
       payload["contact[message]"] ||
@@ -82,14 +66,14 @@ export default async function handler(req, res) {
       payload.body ||
       "";
 
-    // Page / product info forwarded from Shopify form hidden fields
+    // Page / product info from hidden fields
     const pageUrl = payload.page_url || "";
     const referrer = payload.referrer || "";
     const productHandle = payload.product_handle || "";
     const productTitle = payload.product_title || "";
     const productId = payload.product_id || "";
 
-    // --- 1) Build profile payload with custom properties ---
+    // --- BUILD PROFILE BODY WITH CUSTOM PROPERTIES ---
     const profileBody = {
       data: {
         type: "profile",
@@ -105,13 +89,15 @@ export default async function handler(req, res) {
             last_contact_product_id: productId,
             last_contact_name: contactName,
             last_contact_phone: contactPhone,
-            last_contact_message: contactMessage
+            last_contact_message: contactMessage,
+            // raw payload so you can always see *everything* that was submitted
+            last_contact_form_raw: payload
           }
         }
       }
     };
 
-    // --- 1) Create / Update profile in Klaviyo ---
+    // --- 1) CREATE/UPDATE PROFILE ---
     const createResp = await fetch("https://a.klaviyo.com/api/profiles", {
       method: "POST",
       headers: {
@@ -136,7 +122,8 @@ export default async function handler(req, res) {
         ok: false,
         step: "profile_create",
         status: createResp.status,
-        body: createJson
+        body: createJson,
+        debug_profile_payload: profileBody
       });
     }
 
@@ -146,11 +133,12 @@ export default async function handler(req, res) {
       return res.status(502).json({
         ok: false,
         message: "No profile id returned",
-        body: createJson
+        body: createJson,
+        debug_profile_payload: profileBody
       });
     }
 
-    // --- 2) Link profile to list ---
+    // --- 2) LINK PROFILE TO LIST ---
     const listEndpoint = `https://a.klaviyo.com/api/lists/${encodeURIComponent(
       KLAVIYO_LIST_ID
     )}/relationships/profiles`;
@@ -174,7 +162,6 @@ export default async function handler(req, res) {
       linkJson = linkText;
     }
 
-    // If link fails, we surface it, but still show profile info
     if (!linkResp.ok && linkResp.status !== 204) {
       console.error("LIST LINK ERROR:", linkResp.status, linkText);
       return res.status(502).json({
@@ -186,7 +173,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // --- Success response to caller ---
+    // --- SUCCESS RESPONSE ---
     return res.status(200).json({
       ok: true,
       email: email,
