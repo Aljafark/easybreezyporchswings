@@ -53,7 +53,7 @@ export default async function handler(req, res) {
 
     // Phone: contact[Phone] or similar
     const contactPhone =
-      payload["contact[Phone]"] ||
+      payload["contact[Phone number]"] ||
       payload["contact[phone]"] ||
       payload.phone ||
       "";
