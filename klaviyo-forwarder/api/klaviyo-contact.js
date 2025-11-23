@@ -16,9 +16,6 @@ export default async function handler(req, res) {
     const payload =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
-    // ✅ DEBUG: this is where you log payload (INSIDE the handler, after it's defined)
-    console.log("DEBUG_PAYLOAD:", payload);
-
     // --- Extract email (Dawn contact form uses name="contact[email]") ---
     const email =
       payload["contact[email]"] ||
@@ -59,11 +56,12 @@ export default async function handler(req, res) {
         .json({ ok: false, message: "klaviyo_list not allowed" });
     }
 
-    // --- Extract contact fields from Shopify contact form payload ---
-    // Name: Dawn uses contact[Name] (capitalized) in English
+    // --- Extract contact fields from payload ---
+    // Name: Dawn uses contact[Name] (capitalized) in English; your curl uses "first_name"
     const contactName =
       payload["contact[Name]"] ||
       payload["contact[name]"] ||
+      payload.first_name ||
       payload.name ||
       "";
 
@@ -91,17 +89,14 @@ export default async function handler(req, res) {
     const productTitle = payload.product_title || "";
     const productId = payload.product_id || "";
 
-    // --- 1) Create / Update profile (core fields + custom properties) ---
+    // --- 1) Build profile payload with custom properties ---
     const profileBody = {
       data: {
         type: "profile",
         attributes: {
           email: email,
-          // Store full name as first_name (or adjust if you prefer split)
           first_name: contactName || undefined,
           phone_number: contactPhone || undefined,
-
-          // Custom properties that show under "Custom Properties" on the profile
           properties: {
             last_contact_page: pageUrl,
             last_contact_referrer: referrer,
@@ -116,6 +111,7 @@ export default async function handler(req, res) {
       }
     };
 
+    // --- 1) Create / Update profile in Klaviyo ---
     const createResp = await fetch("https://a.klaviyo.com/api/profiles", {
       method: "POST",
       headers: {
@@ -178,13 +174,15 @@ export default async function handler(req, res) {
       linkJson = linkText;
     }
 
+    // If link fails, we surface it, but still show profile info
     if (!linkResp.ok && linkResp.status !== 204) {
       console.error("LIST LINK ERROR:", linkResp.status, linkText);
       return res.status(502).json({
         ok: false,
         step: "list_link",
         status: linkResp.status,
-        body: linkJson
+        body: linkJson,
+        debug_profile_payload: profileBody
       });
     }
 
@@ -195,7 +193,8 @@ export default async function handler(req, res) {
       profile_id: profileId,
       list_id: KLAVIYO_LIST_ID,
       klaviyo_profile_create_status: createResp.status,
-      klaviyo_list_link_status: linkResp.status
+      klaviyo_list_link_status: linkResp.status,
+      debug_profile_payload: profileBody
     });
   } catch (err) {
     console.error("SERVER ERROR:", err);
