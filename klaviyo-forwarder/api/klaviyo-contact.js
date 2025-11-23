@@ -1,4 +1,5 @@
 // /api/klaviyo-contact.js
+
 export default async function handler(req, res) {
   // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -12,7 +13,7 @@ export default async function handler(req, res) {
 
   try {
     const payload =
-      typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+      typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
 
     // --- EMAIL ---
     const email =
@@ -41,7 +42,8 @@ export default async function handler(req, res) {
     }
 
     // --- EXTRACT CONTACT FIELDS FROM FORM ---
-    // Name: contact[Name], contact[name], first_name, name
+
+    // Name: Dawn uses contact[Name] (translated), plus we support first_name/name from payload
     const contactName =
       payload["contact[Name]"] ||
       payload["contact[name]"] ||
@@ -49,14 +51,14 @@ export default async function handler(req, res) {
       payload.name ||
       "";
 
-    // Phone: contact[Phone], contact[phone], phone
+    // Phone: contact[Phone] or similar
     const contactPhone =
       payload["contact[Phone]"] ||
       payload["contact[phone]"] ||
       payload.phone ||
       "";
 
-    // Message/comment: many possible keys
+    // Message / comment textarea: support several common keys
     const contactMessage =
       payload["contact[Message]"] ||
       payload["contact[message]"] ||
@@ -82,22 +84,24 @@ export default async function handler(req, res) {
           first_name: contactName || undefined,
           phone_number: contactPhone || undefined,
           properties: {
+            // context
             last_contact_page: pageUrl,
             last_contact_referrer: referrer,
             last_contact_product_handle: productHandle,
             last_contact_product_title: productTitle,
             last_contact_product_id: productId,
+            // form fields
             last_contact_name: contactName,
             last_contact_phone: contactPhone,
             last_contact_message: contactMessage,
-            // raw payload so you can always see *everything* that was submitted
+            // raw payload for debugging / future mapping
             last_contact_form_raw: payload
           }
         }
       }
     };
 
-    // --- 1) CREATE/UPDATE PROFILE ---
+    // --- 1) CREATE / UPDATE PROFILE ---
     const createResp = await fetch("https://a.klaviyo.com/api/profiles", {
       method: "POST",
       headers: {
@@ -109,10 +113,10 @@ export default async function handler(req, res) {
     });
 
     const createText = await createResp.text();
-    let createJson = null;
+    let createJson;
     try {
       createJson = JSON.parse(createText);
-    } catch (e) {
+    } catch {
       createJson = createText;
     }
 
@@ -142,6 +146,7 @@ export default async function handler(req, res) {
     const listEndpoint = `https://a.klaviyo.com/api/lists/${encodeURIComponent(
       KLAVIYO_LIST_ID
     )}/relationships/profiles`;
+
     const linkBody = { data: [{ type: "profile", id: profileId }] };
 
     const linkResp = await fetch(listEndpoint, {
@@ -155,10 +160,10 @@ export default async function handler(req, res) {
     });
 
     const linkText = await linkResp.text();
-    let linkJson = null;
+    let linkJson;
     try {
       linkJson = JSON.parse(linkText);
-    } catch (e) {
+    } catch {
       linkJson = linkText;
     }
 
@@ -173,10 +178,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // --- SUCCESS RESPONSE ---
+    // --- SUCCESS ---
     return res.status(200).json({
       ok: true,
-      email: email,
+      email,
       profile_id: profileId,
       list_id: KLAVIYO_LIST_ID,
       klaviyo_profile_create_status: createResp.status,
@@ -185,8 +190,10 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Server error", error: String(err) });
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: String(err)
+    });
   }
 }
