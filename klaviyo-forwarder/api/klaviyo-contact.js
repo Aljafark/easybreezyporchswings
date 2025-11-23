@@ -96,22 +96,15 @@ if (!contactPhone) {
       data: {
         type: "profile",
         attributes: {
-          email: email,
-          first_name: contactName || undefined,
-          phone_number: contactPhone || undefined,
           properties: {
             // context
-            last_contact_page: pageUrl,
-            last_contact_referrer: referrer,
-            last_contact_product_handle: productHandle,
-            last_contact_product_title: productTitle,
-            last_contact_product_id: productId,
-            // form fields
-            last_contact_name: contactName,
-            last_contact_phone: contactPhone,
-            last_contact_message: contactMessage,
-            // raw payload for debugging / future mapping
-            last_contact_form_raw: payload
+            contact_name: contactName,
+            contact_email: email,
+            contact_phone: contactPhone,
+            contact_message: contactMessage,
+            page_url: pageUrl,
+            referrer_url: referrer,
+            product_handle: productHandle
           }
         }
       }
