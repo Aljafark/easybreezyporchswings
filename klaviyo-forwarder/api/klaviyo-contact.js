@@ -51,12 +51,28 @@ export default async function handler(req, res) {
       payload.name ||
       "";
 
-    // Phone: contact[Phone] or similar
-    const contactPhone =
-      payload["contact[Phone number]"] ||
-      payload["contact[phone]"] ||
-      payload.phone ||
-      "";
+  // Phone number — support your exact field name and a bunch of variants
+  let contactPhone =
+    payload["contact[Phone]"] ||
+    payload["contact[phone]"] ||
+    payload["contact[Phone number]"] ||   // 👈 your actual field
+    payload["contact[Phone Number]"] ||
+    payload["contact[phone number]"] ||
+    payload.phone ||
+    payload.telephone ||
+    payload.tel ||
+    payload.mobile ||
+    "";
+
+    // Extra safety: if still empty, grab the first field whose key includes "phone"
+if (!contactPhone) {
+  for (const [key, value] of Object.entries(payload)) {
+    if (typeof value === "string" && /phone/i.test(key)) {
+      contactPhone = value;
+      break;
+    }
+  }
+}
 
     // Message / comment textarea: support several common keys
     const contactMessage =
