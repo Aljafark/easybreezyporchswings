@@ -91,24 +91,25 @@ if (!contactPhone) {
     const productTitle = payload.product_title || "";
     const productId = payload.product_id || "";
 
-    // --- BUILD PROFILE BODY WITH CUSTOM PROPERTIES ---
-    const profileBody = {
-      data: {
-        type: "profile",
-        attributes: {
-          properties: {
-            // context
-            contact_name: contactName,
-            contact_email: email,
-            contact_phone: contactPhone,
-            contact_message: contactMessage,
-            page_url: pageUrl,
-            referrer_url: referrer,
-            product_handle: productHandle
-          }
-        }
+// --- BUILD PROFILE BODY WITH CUSTOM PROPERTIES ---
+const profileBody = {
+  data: {
+    type: "profile",
+    attributes: {
+      email: email,   // <- REQUIRED for Klaviyo profile create/update
+      properties: {
+        contact_name: contactName || null,
+        contact_email: email || null,
+        contact_phone: contactPhone || null,
+        contact_message: contactMessage || null,
+        page_url: pageUrl || null,
+        referrer_url: referrer || null,
+        product_handle: productHandle || null
       }
-    };
+    }
+  }
+};
+
 
     // --- 1) CREATE / UPDATE PROFILE ---
     const createResp = await fetch("https://a.klaviyo.com/api/profiles", {
