@@ -7,111 +7,84 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ ok: false, message: "Method Not Allowed" });
-  }
 
   try {
+    // Parse payload
     const payload =
-      typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
-    // --- EMAIL ---
+    console.log("DEBUG_PAYLOAD:", payload);
+
+    // Extract email (Shopify uses contact[email])
     const email =
       payload["contact[email]"] ||
       payload.email ||
       payload.contact_email ||
       "";
+
     if (!email) {
       return res.status(400).json({ ok: false, message: "Missing email" });
     }
 
-    // --- ENV CONFIG ---
-    const KLAVIYO_API_KEY = (process.env.KLAVIYO_API_KEY || "").trim();
-    const KLAVIYO_LIST_ID = (process.env.KLAVIYO_LIST_ID || "").trim();
-    const REVISION = process.env.KLAVIYO_API_REVISION || "2025-10-15";
-
-    if (!KLAVIYO_API_KEY) {
-      return res
-        .status(500)
-        .json({ ok: false, message: "Missing KLAVIYO_API_KEY in env" });
-    }
-    if (!KLAVIYO_LIST_ID) {
-      return res
-        .status(500)
-        .json({ ok: false, message: "Missing KLAVIYO_LIST_ID in env" });
-    }
-
-    // --- EXTRACT CONTACT FIELDS FROM FORM ---
-
-    // Name: Dawn uses contact[Name] (translated), plus we support first_name/name from payload
+    // Extract form fields
     const contactName =
-      payload["contact[Name]"] ||
-      payload["contact[name]"] ||
-      payload.first_name ||
       payload.name ||
-      "";
+      payload.first_name ||
+      payload["contact[Name]"] ||
+      null;
 
-  // Phone number — support your exact field name and a bunch of variants
-  let contactPhone =
-    payload["contact[Phone]"] ||
-    payload["contact[phone]"] ||
-    payload["contact[Phone number]"] ||   // 👈 your actual field
-    payload["contact[Phone Number]"] ||
-    payload["contact[phone number]"] ||
-    payload.phone ||
-    payload.telephone ||
-    payload.tel ||
-    payload.mobile ||
-    "";
+    const contactPhone =
+      payload.phone ||
+      payload["contact[Phone number]"] ||
+      payload["contact[Phone]"] ||
+      null;
 
-    // Extra safety: if still empty, grab the first field whose key includes "phone"
-if (!contactPhone) {
-  for (const [key, value] of Object.entries(payload)) {
-    if (typeof value === "string" && /phone/i.test(key)) {
-      contactPhone = value;
-      break;
-    }
-  }
-}
-
-    // Message / comment textarea: support several common keys
     const contactMessage =
-      payload["contact[Message]"] ||
-      payload["contact[message]"] ||
-      payload["contact[Comment]"] ||
-      payload["contact[comment]"] ||
       payload.message ||
-      payload.body ||
-      "";
+      payload["contact[Message]"] ||
+      payload["contact[Body]"] ||
+      payload["contact[Comment]"] ||
+      null;
 
-    // Page / product info from hidden fields
+    // Context fields
     const pageUrl = payload.page_url || "";
     const referrer = payload.referrer || "";
     const productHandle = payload.product_handle || "";
-    const productTitle = payload.product_title || "";
-    const productId = payload.product_id || "";
 
-// --- BUILD PROFILE BODY WITH CUSTOM PROPERTIES ---
-const profileBody = {
-  data: {
-    type: "profile",
-    attributes: {
-      email: email,   // <- REQUIRED for Klaviyo profile create/update
-      properties: {
-        contact_name: contactName || null,
-        contact_email: email || null,
-        contact_phone: contactPhone || null,
-        contact_message: contactMessage || null,
-        page_url: pageUrl || null,
-        referrer_url: referrer || null,
-        product_handle: productHandle || null
+    // --- ENV VARS ---
+    const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY || "";
+    const KLAVIYO_LIST_ID =
+      payload.klaviyo_list || process.env.KLAVIYO_LIST_ID || "";
+
+    const REVISION = process.env.KLAVIYO_API_REVISION || "2025-10-15";
+
+    if (!KLAVIYO_API_KEY)
+      return res
+        .status(500)
+        .json({ ok: false, message: "Missing KLAVIYO_API_KEY" });
+
+    if (!KLAVIYO_LIST_ID)
+      return res
+        .status(500)
+        .json({ ok: false, message: "Missing KLAVIYO_LIST_ID" });
+
+    //
+    // -------------------------------------------------------
+    //   STEP 1 — CREATE PROFILE (POST)
+    // -------------------------------------------------------
+    //
+
+    const createBody = {
+      data: {
+        type: "profile",
+        attributes: {
+          email: email
+        }
       }
-    }
-  }
-};
+    };
 
-
-    // --- 1) CREATE / UPDATE PROFILE ---
     const createResp = await fetch("https://a.klaviyo.com/api/profiles", {
       method: "POST",
       headers: {
@@ -119,84 +92,136 @@ const profileBody = {
         Authorization: `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         Revision: REVISION
       },
-      body: JSON.stringify(profileBody)
+      body: JSON.stringify(createBody)
     });
 
     const createText = await createResp.text();
-    let createJson;
+    let createJson = {};
     try {
       createJson = JSON.parse(createText);
-    } catch {
-      createJson = createText;
-    }
+    } catch {}
 
-    if (!createResp.ok) {
+    if (!createResp.ok && createResp.status !== 409) {
       console.error("PROFILE CREATE ERROR:", createResp.status, createText);
       return res.status(502).json({
         ok: false,
         step: "profile_create",
         status: createResp.status,
-        body: createJson,
-        debug_profile_payload: profileBody
+        body: createJson
       });
     }
 
-    const profileId = createJson?.data?.id;
+    //
+    // Extract profile ID (new or existing)
+    //
+    let profileId =
+      createJson?.data?.id ||
+      createJson?.errors?.[0]?.meta?.duplicate_profile_id ||
+      null;
+
     if (!profileId) {
-      console.error("No profile id returned", createText);
+      console.error("No profile ID returned");
       return res.status(502).json({
         ok: false,
-        message: "No profile id returned",
-        body: createJson,
-        debug_profile_payload: profileBody
+        message: "No profile ID returned",
+        body: createJson
       });
     }
 
-    // --- 2) LINK PROFILE TO LIST ---
-    const listEndpoint = `https://a.klaviyo.com/api/lists/${encodeURIComponent(
-      KLAVIYO_LIST_ID
-    )}/relationships/profiles`;
+    //
+    // -------------------------------------------------------
+    //   STEP 2 — UPDATE CUSTOM PROPERTIES (PATCH)
+    // -------------------------------------------------------
+    //
 
-    const linkBody = { data: [{ type: "profile", id: profileId }] };
+    const updateBody = {
+      data: {
+        type: "profile",
+        id: profileId,
+        attributes: {
+          properties: {
+            contact_name: contactName || null,
+            contact_email: email || null,
+            contact_phone: contactPhone || null,
+            contact_message: contactMessage || null,
+            page_url: pageUrl || null,
+            referrer_url: referrer || null,
+            product_handle: productHandle || null
+          }
+        }
+      }
+    };
 
-    const linkResp = await fetch(listEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/vnd.api+json",
-        Authorization: `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
-        Revision: REVISION
-      },
-      body: JSON.stringify(linkBody)
-    });
+    const updateResp = await fetch(
+      `https://a.klaviyo.com/api/profiles/${profileId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/vnd.api+json",
+          Authorization: `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
+          Revision: REVISION
+        },
+        body: JSON.stringify(updateBody)
+      }
+    );
 
-    const linkText = await linkResp.text();
-    let linkJson;
+    const updateText = await updateResp.text();
+    let updateJson = {};
     try {
-      linkJson = JSON.parse(linkText);
-    } catch {
-      linkJson = linkText;
+      updateJson = JSON.parse(updateText);
+    } catch {}
+
+    if (!updateResp.ok) {
+      console.warn("PROFILE UPDATE WARNING:", updateResp.status, updateText);
     }
 
-    if (!linkResp.ok && linkResp.status !== 204) {
-      console.error("LIST LINK ERROR:", linkResp.status, linkText);
-      return res.status(502).json({
-        ok: false,
-        step: "list_link",
-        status: linkResp.status,
-        body: linkJson,
-        debug_profile_payload: profileBody
-      });
+    //
+    // -------------------------------------------------------
+    //   STEP 3 — ADD PROFILE TO LIST
+    // -------------------------------------------------------
+    //
+
+    const listBody = {
+      data: [{ type: "profile", id: profileId }]
+    };
+
+    const listResp = await fetch(
+      `https://a.klaviyo.com/api/lists/${KLAVIYO_LIST_ID}/relationships/profiles`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/vnd.api+json",
+          Authorization: `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
+          Revision: REVISION
+        },
+        body: JSON.stringify(listBody)
+      }
+    );
+
+    const listText = await listResp.text();
+    let listJson = {};
+    try {
+      listJson = JSON.parse(listText);
+    } catch {}
+
+    if (!listResp.ok && listResp.status !== 204) {
+      console.warn("LIST LINK WARNING:", listResp.status, listText);
     }
 
-    // --- SUCCESS ---
+    //
+    // -------------------------------------------------------
+    //   SUCCESS
+    // -------------------------------------------------------
+    //
+
     return res.status(200).json({
       ok: true,
       email,
       profile_id: profileId,
       list_id: KLAVIYO_LIST_ID,
       klaviyo_profile_create_status: createResp.status,
-      klaviyo_list_link_status: linkResp.status,
-      debug_profile_payload: profileBody
+      klaviyo_profile_update_status: updateResp.status,
+      klaviyo_list_link_status: listResp.status
     });
   } catch (err) {
     console.error("SERVER ERROR:", err);
