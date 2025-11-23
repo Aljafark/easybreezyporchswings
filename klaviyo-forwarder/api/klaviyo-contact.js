@@ -16,6 +16,9 @@ export default async function handler(req, res) {
     const payload =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
+    // ✅ DEBUG: this is where you log payload (INSIDE the handler, after it's defined)
+    console.log("DEBUG_PAYLOAD:", payload);
+
     // --- Extract email (Dawn contact form uses name="contact[email]") ---
     const email =
       payload["contact[email]"] ||
@@ -57,7 +60,7 @@ export default async function handler(req, res) {
     }
 
     // --- Extract contact fields from Shopify contact form payload ---
-    // Name: Dawn uses contact[Name] in English; we also fall back to generic keys
+    // Name: Dawn uses contact[Name] (capitalized) in English
     const contactName =
       payload["contact[Name]"] ||
       payload["contact[name]"] ||
@@ -71,7 +74,7 @@ export default async function handler(req, res) {
       payload.phone ||
       "";
 
-    // Comment / message textarea field: contact[Message] / contact[Comment], etc.
+    // Comment / message textarea field
     const contactMessage =
       payload["contact[Message]"] ||
       payload["contact[message]"] ||
@@ -88,17 +91,17 @@ export default async function handler(req, res) {
     const productTitle = payload.product_title || "";
     const productId = payload.product_id || "";
 
-    // --- 1) Create / Update profile (only allowed profile attributes + properties) ---
+    // --- 1) Create / Update profile (core fields + custom properties) ---
     const profileBody = {
       data: {
         type: "profile",
         attributes: {
           email: email,
-          // You can choose how you want to map name; simplest is full name into first_name
+          // Store full name as first_name (or adjust if you prefer split)
           first_name: contactName || undefined,
           phone_number: contactPhone || undefined,
 
-          // Custom properties that show under "Custom Properties" in the profile
+          // Custom properties that show under "Custom Properties" on the profile
           properties: {
             last_contact_page: pageUrl,
             last_contact_referrer: referrer,
