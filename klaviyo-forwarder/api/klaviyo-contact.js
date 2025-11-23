@@ -201,3 +201,4 @@ export default async function handler(req, res) {
       .json({ ok: false, message: "Server error", error: String(err) });
   }
 }
+console.log("DEBUG_PAYLOAD:", payload);
